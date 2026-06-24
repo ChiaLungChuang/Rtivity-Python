@@ -95,7 +95,7 @@ class TestActivityByPhase:
 
     def test_one_row_per_animal_per_phase(self, data):
         df = activity_by_phase(data)
-        assert df.groupby(["id", "x"]).size().max() == 1
+        assert df.groupby(["id", "x"], observed=False).size().max() == 1
 
 
 class TestActivityByDay:
