@@ -1,0 +1,37 @@
+[project]
+name = "rtivity-python"
+version = "0.9.0"
+description = "Python rewrite of Rtivity (Silva et al., 2022). Shiny for Python application for Drosophila DAM activity, sleep, rhythm, and survival analysis."
+readme = "README.md"
+requires-python = ">=3.11"
+license = {text = "CC-BY-4.0"}
+authors = [
+    {name = "Chia-Lung Chuang"}
+]
+keywords = ["drosophila", "behavioral-analysis", "sleep", "circadian-rhythm", "actigraphy", "DAM", "neurobiology"]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Framework :: Shiny",
+    "Intended Audience :: Science/Research",
+    "Topic :: Scientific/Engineering :: Bio-Informatics",
+    "Operating System :: OS Independent",
+]
+
+[project.urls]
+Repository = "https://github.com/ChiaLungChuang/Rtivity-Python"
+"R version" = "https://github.com/ChiaLungChuang/Rtivity-DAM-sleep-analysis"
+"Original Rtivity (R)" = "https://github.com/Rilva/Rtivity"
+
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+filterwarnings = [
+    "ignore::UserWarning:openpyxl",
+]

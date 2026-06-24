@@ -1,0 +1,19 @@
+# Core
+pandas>=2.2,<3.0
+numpy>=1.26,<3.0
+scipy>=1.13,<2.0
+
+# UI
+shiny>=1.6,<2.0
+
+# Plotting
+plotly>=6.0,<7.0
+
+# Survival analysis
+lifelines>=0.30,<1.0
+
+# File I/O
+openpyxl>=3.1,<4.0
+
+# Dev / test
+pytest>=8.0,<10.0
