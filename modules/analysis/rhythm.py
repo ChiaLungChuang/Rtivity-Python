@@ -16,7 +16,6 @@ import numpy as np
 import pandas as pd
 from scipy import signal
 from scipy.stats import chi2
-from scipy.optimize import curve_fit
 
 
 # ── periodogram helpers ───────────────────────────────────────────────────────

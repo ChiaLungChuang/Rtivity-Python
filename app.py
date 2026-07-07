@@ -24,14 +24,18 @@ from shiny import App, reactive, render, req, ui
 
 sys.path.insert(0, str(Path(__file__).parent))
 
+from modules.data.dam_parser import get_time_range
 from modules.data.data_store import DataStore, Settings
+from modules.data.metadata import build_manual_conditions
 from modules.analysis.activity import (
     activity_by_day,
     activity_by_day_phase,
     activity_by_phase,
     bout_activity_by_day,
+    bout_activity_by_day_phase,
     bout_activity_by_phase,
     bout_duration_by_day,
+    bout_duration_by_day_phase,
     bout_duration_by_phase,
     detect_activity_bouts,
     summary_stats,
@@ -61,15 +65,13 @@ from modules.analysis.sleep import (
 )
 from modules.analysis.survival import (
     build_survival_data,
+    flag_ambiguous_deaths,
     kaplan_meier_curves,
     logrank_test,
     median_survival,
 )
 from modules.ui.plots import (
-    actogram_plot,
     box_plot,
-    daily_profile_plot,
-    km_plot,
     periodogram_plot,
 )
 
@@ -87,6 +89,31 @@ def _sidebar_card(*args, title: str = "", width: int = 280) -> ui.Tag:
         width=width,
         bg="#f8f9fa",
     )
+
+
+def _compress_channels(channels: list[int]) -> str:
+    """Render a sorted channel list as compact ranges: [1,2,3,4,7] -> '1-4, 7'."""
+    chans = sorted(set(channels))
+    if not chans:
+        return ""
+    parts, run_start, prev = [], chans[0], chans[0]
+    for c in chans[1:] + [None]:
+        if c == prev + 1:
+            prev = c
+            continue
+        parts.append(f"{run_start}-{prev}" if prev > run_start else f"{run_start}")
+        run_start = prev = c
+    return ", ".join(parts)
+
+
+def _detect_time_range(path: str) -> tuple[str, str]:
+    """Best-effort detection of a DAM file's [first, last] timestamp, used to
+    pre-fill Start/Finish datetime fields in Manual Setup mode."""
+    try:
+        start, stop = get_time_range(path)
+        return (str(start), str(stop))
+    except Exception:
+        return ("", "")
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -113,11 +140,51 @@ app_ui = ui.page_navbar(
             _sidebar_card(
                 ui.input_file("dam_files", "DAM monitor files (.txt)",
                               multiple=True, accept=[".txt"]),
-                ui.input_file("metadata_file", "Metadata file (.xlsx)",
-                              accept=[".xlsx"]),
+                ui.input_radio_buttons(
+                "meta_mode", 
+                "Metadata Source", 
+                choices={"upload": "Upload .xlsx", "manual": "Manual Setup"}
+            ),
+            ui.panel_conditional(
+                "input.meta_mode === 'upload'",
+                ui.input_file("metadata_file", "Metadata file (.xlsx)", accept=[".xlsx"])
+            ),
+            ui.panel_conditional(
+                "input.meta_mode === 'manual'",
+                ui.output_ui("manual_dates_ui"),
+                ui.hr(),
+                ui.p("Build conditions one at a time: name it, tick its "
+                     "channels, click Add. Repeat for each condition — "
+                     "one is fine, or as many as you need.",
+                     class_="text-muted small"),
+                ui.input_select("manual_file", "Assign channels for file",
+                                choices=[]),
+                ui.input_text("manual_cond_name", "Condition name",
+                              placeholder="e.g. Control"),
+                ui.output_ui("manual_channels_ui"),
+                ui.layout_columns(
+                    ui.input_action_button("manual_selectall_btn",
+                                           "Select all", class_="btn btn-sm btn-outline-secondary"),
+                    ui.input_action_button("manual_clearsel_btn",
+                                           "Clear ticks", class_="btn btn-sm btn-outline-secondary"),
+                    col_widths=[6, 6],
+                ),
+                ui.input_action_button("manual_add_btn", "Add condition",
+                                       class_="btn btn-primary w-100 mt-2 mb-2"),
+                ui.output_data_frame("manual_conditions_table"),
+                ui.layout_columns(
+                    ui.input_action_button("manual_remove_btn", "Remove selected",
+                                           class_="btn btn-sm btn-outline-danger"),
+                    ui.input_action_button("manual_clear_btn", "Clear all",
+                                           class_="btn btn-sm btn-outline-danger"),
+                    col_widths=[6, 6],
+                ),
+                ui.download_button("save_metadata_btn", "Save Metadata",
+                                   class_="btn btn-outline-secondary w-100 mt-2"),
+            ),
                 ui.hr(),
                 ui.h6("Settings", class_="fw-bold"),
-                ui.input_text("zt0", "Lights-on time (ZT0)", value="08:00:00"),
+                ui.input_text("zt0", "Lights-on time (ZT0)", value="06:00:00"),
                 ui.input_numeric("ld_period", "LD cycle period (h)", 24.0,
                                  min=1, max=48, step=0.5),
                 ui.input_numeric("light_hours", "Light phase duration (h)", 12.0,
@@ -286,6 +353,16 @@ app_ui = ui.page_navbar(
                 ui.hr(),
                 ui.h6("Log-rank tests (pairwise)"),
                 ui.output_data_frame("logrank_table"),
+                ui.hr(),
+                ui.h6("Flagged animals — activity after inferred death"),
+                ui.p("An animal is called dead at the first silent stretch that "
+                     "reaches the threshold above; any later movement is treated "
+                     "as artifact and does not change the death time. The animals "
+                     "below moved again after that point — review them in case a "
+                     "monitor glitch or a too-short threshold mislabeled a living "
+                     "animal. An empty table means no such outliers.",
+                     class_="text-muted small"),
+                ui.output_data_frame("flagged_deaths_table"),
             ),
         ),
     ),
@@ -305,7 +382,10 @@ def server(input, output, session):
 
     # ── core reactive state ───────────────────────────────────────────────────
 
-    r_store   = reactive.value(None)   # DataStore
+    r_store      = reactive.value(None)   # DataStore
+    r_load_error = reactive.value(None)   # last load failure message, if any
+    r_conditions = reactive.value([])     # manual-mode conditions accumulator:
+                                          #   [{"file", "label", "channels": (int,)}]
     r_ab_df   = reactive.value(None)   # data with activity bouts
     r_sleep   = reactive.value(None)   # data with sleep annotation + bouts
     r_pgram   = reactive.value(None)   # periodogram DataFrame
@@ -313,25 +393,58 @@ def server(input, output, session):
     r_isivra  = reactive.value(None)   # IS/IV/RA DataFrame
     r_surv_df = reactive.value(None)   # survival data
     r_km_df   = reactive.value(None)   # KM curves
+    r_flagged = reactive.value(None)   # animals active after inferred death
+
+    # ── manual metadata helpers ───────────────────────────────────────────────
+
+    def _collect_manual_entries() -> list[dict]:
+        """Reshape the accumulated r_conditions list + per-file date inputs into
+        the file-grouped structure build_manual_conditions() expects."""
+        dam_files = input.dam_files() or []
+        idx_of = {f["name"]: i for i, f in enumerate(dam_files)}
+
+        by_file: dict[str, list[dict]] = {}
+        for cond in r_conditions():
+            by_file.setdefault(cond["file"], []).append(
+                {"label": cond["label"], "channels": list(cond["channels"])}
+            )
+
+        entries = []
+        for fname, groups in by_file.items():
+            i = idx_of.get(fname)
+            sid, eid = f"start_dt_{i}", f"stop_dt_{i}"
+            entries.append({
+                "file": fname,
+                "start_datetime": input[sid]() if i is not None and sid in input else "",
+                "stop_datetime":  input[eid]() if i is not None and eid in input else "",
+                "groups": groups,
+            })
+        return entries
 
     # ── data loading ──────────────────────────────────────────────────────────
 
     @reactive.effect
     @reactive.event(input.load_btn)
     def _load():
-        dam_files  = input.dam_files()
-        meta_files = input.metadata_file()
-        if not dam_files or not meta_files:
+        dam_files = input.dam_files()
+        mode = input.meta_mode()
+
+        if not dam_files:
             r_store.set(None)
+            r_load_error.set("Upload DAM monitor files (.txt) first.")
+            return
+
+        if mode != "manual" and not input.metadata_file():
+            r_store.set(None)
+            r_load_error.set(
+                "Upload a metadata .xlsx file, or switch to Manual Setup."
+            )
             return
 
         try:
             tmpdir = Path(tempfile.mkdtemp(prefix="rtivity_"))
             for f in dam_files:
                 shutil.copy(f["datapath"], tmpdir / f["name"])
-
-            meta_path = tmpdir / "metadata.xlsx"
-            shutil.copy(meta_files[0]["datapath"], meta_path)
 
             settings = Settings(
                 zt0=input.zt0(),
@@ -341,7 +454,15 @@ def server(input, output, session):
                 bout_threshold_min=int(input.bout_threshold_setting()),
             )
             store = DataStore(dam_dir=tmpdir, settings=settings)
-            store.load_from_metadata(meta_path)
+
+            if mode == "manual":
+                entries = _collect_manual_entries()
+                conditions = build_manual_conditions(entries)
+                store.load_from_dataframe(conditions, dam_dir=tmpdir)
+            else:
+                meta_path = tmpdir / "metadata.xlsx"
+                shutil.copy(input.metadata_file()[0]["datapath"], meta_path)
+                store.load_from_metadata(meta_path)
 
             # Invalidate all derived caches
             r_ab_df.set(None)
@@ -351,7 +472,9 @@ def server(input, output, session):
             r_isivra.set(None)
             r_surv_df.set(None)
             r_km_df.set(None)
+            r_flagged.set(None)
 
+            r_load_error.set(None)
             r_store.set(store)
 
             # Populate animal / group selectors
@@ -362,8 +485,10 @@ def server(input, output, session):
             ui.update_select("vis_group",   choices=labels,
                              selected=labels[0] if labels else None)
 
-        except Exception:
+        except Exception as exc:
             r_store.set(None)
+            r_load_error.set(str(exc))
+            ui.notification_show(f"Load failed: {exc}", type="error", duration=8)
             print(traceback.format_exc())
 
     # ── derived data accessors ────────────────────────────────────────────────
@@ -377,9 +502,148 @@ def server(input, output, session):
 
     @output
     @render.ui
+    def manual_dates_ui():
+        """Per-file Start/Finish datetime fields, auto-filled from each file's
+        recorded range. Depends only on the uploaded file set, so user edits
+        persist (the block is not re-rendered while typing)."""
+        files = input.dam_files()
+        if not files:
+            return ui.p("Please upload DAM monitor files (.txt) first.",
+                        style="color: red;")
+
+        cards = []
+        for i, f in enumerate(files):
+            start_val, stop_val = _detect_time_range(f["datapath"])
+            cards.append(ui.div(
+                ui.tags.small(f["name"], class_="fw-bold"),
+                ui.layout_columns(
+                    ui.input_text(f"start_dt_{i}", "Start", value=start_val),
+                    ui.input_text(f"stop_dt_{i}", "Finish", value=stop_val),
+                    col_widths=[6, 6],
+                ),
+                class_="mb-2",
+            ))
+        return ui.TagList(*cards)
+
+    def _assigned_channels(filename: str) -> set[int]:
+        """Channels already claimed by some condition on the given file."""
+        return {
+            ch for cond in r_conditions() if cond["file"] == filename
+            for ch in cond["channels"]
+        }
+
+    @output
+    @render.ui
+    def manual_channels_ui():
+        """Checkbox grid of the channels still unassigned for the selected
+        file. Re-renders (and so resets the ticks) when the file changes or a
+        condition is added/removed."""
+        filename = input.manual_file()
+        if not filename:
+            return ui.p("Upload files and pick one above.", class_="text-muted small")
+
+        available = [c for c in range(1, 33) if c not in _assigned_channels(filename)]
+        if not available:
+            return ui.p("All 32 channels are assigned for this file.",
+                        class_="text-success small")
+        return ui.input_checkbox_group(
+            "manual_channels", "Channels (tick to include)",
+            choices={str(c): str(c) for c in available},
+            inline=True,
+        )
+
+    @output
+    @render.data_frame
+    def manual_conditions_table():
+        conds = r_conditions()
+        if not conds:
+            return render.DataGrid(pd.DataFrame(
+                {"info": ["No conditions yet — add one above."]}))
+        table = pd.DataFrame([
+            {"file": c["file"], "condition": c["label"],
+             "channels": _compress_channels(list(c["channels"]))}
+            for c in conds
+        ])
+        return render.DataGrid(table, width="100%", selection_mode="rows")
+
+    @reactive.effect
+    @reactive.event(input.dam_files)
+    def _reset_conditions_on_upload():
+        files = input.dam_files() or []
+        names = [f["name"] for f in files]
+        ui.update_select("manual_file", choices=names,
+                         selected=names[0] if names else None)
+        r_conditions.set([])
+
+    @reactive.effect
+    @reactive.event(input.manual_selectall_btn)
+    def _select_all_channels():
+        available = [c for c in range(1, 33)
+                     if c not in _assigned_channels(input.manual_file())]
+        ui.update_checkbox_group("manual_channels",
+                                 selected=[str(c) for c in available])
+
+    @reactive.effect
+    @reactive.event(input.manual_clearsel_btn)
+    def _clear_channel_ticks():
+        ui.update_checkbox_group("manual_channels", selected=[])
+
+    @reactive.effect
+    @reactive.event(input.manual_add_btn)
+    def _add_condition():
+        filename = input.manual_file()
+        name = (input.manual_cond_name() or "").strip()
+        picked = input.manual_channels() or []
+
+        if not filename:
+            ui.notification_show("Upload files first.", type="warning")
+            return
+        if not name:
+            ui.notification_show("Enter a condition name.", type="warning")
+            return
+        if not picked:
+            ui.notification_show("Tick at least one channel.", type="warning")
+            return
+
+        channels = tuple(sorted(int(c) for c in picked))
+        # Belt-and-braces: the grid only offers unassigned channels, but guard
+        # against a stale selection racing a re-render.
+        overlap = set(channels) & _assigned_channels(filename)
+        if overlap:
+            ui.notification_show(
+                f"Channel(s) {sorted(overlap)} already assigned on this file.",
+                type="error")
+            return
+
+        r_conditions.set(r_conditions() + [
+            {"file": filename, "label": name, "channels": channels}
+        ])
+        ui.update_text("manual_cond_name", value="")
+
+    @reactive.effect
+    @reactive.event(input.manual_remove_btn)
+    def _remove_selected_conditions():
+        selection = manual_conditions_table.cell_selection()
+        rows = set(selection.get("rows", ())) if selection else set()
+        if not rows:
+            ui.notification_show("Select row(s) in the table to remove.",
+                                 type="warning")
+            return
+        r_conditions.set([c for i, c in enumerate(r_conditions()) if i not in rows])
+
+    @reactive.effect
+    @reactive.event(input.manual_clear_btn)
+    def _clear_all_conditions():
+        r_conditions.set([])
+
+    @output
+    @render.ui
     def load_status():
         store = r_store()
         if store is None:
+            err = r_load_error()
+            if err:
+                return ui.p(f"Load failed: {err}", class_="text-danger fw-bold")
             return ui.p("No data loaded. Upload files and click Load data.",
                         class_="text-muted")
         n = len(store.animal_ids)
@@ -388,6 +652,20 @@ def server(input, output, session):
             ui.p(f"Loaded {n} animals across groups: {labels}",
                  class_="text-success fw-bold"),
         )
+
+    @output
+    @render.download(filename="metadata.xlsx")
+    def save_metadata_btn():
+        if not r_conditions():
+            ui.notification_show("Add at least one condition first.", type="warning")
+            return
+        conditions = build_manual_conditions(_collect_manual_entries())
+        tmp_path = Path(tempfile.mkstemp(suffix=".xlsx")[1])
+        try:
+            conditions.to_excel(tmp_path, index=False)
+            yield tmp_path.read_bytes()
+        finally:
+            tmp_path.unlink(missing_ok=True)
 
     @output
     @render.data_frame
@@ -447,11 +725,11 @@ def server(input, output, session):
             if metric == "bout_activity":
                 fns = {"phase": bout_activity_by_phase,
                        "day":   bout_activity_by_day,
-                       "day_phase": lambda d: bout_activity_by_day(d)}
+                       "day_phase": bout_activity_by_day_phase}
             else:
                 fns = {"phase": bout_duration_by_phase,
                        "day":   bout_duration_by_day,
-                       "day_phase": lambda d: bout_duration_by_day(d)}
+                       "day_phase": bout_duration_by_day_phase}
 
         return fns[groupby](df)
 
@@ -637,10 +915,12 @@ def server(input, output, session):
     @reactive.effect
     @reactive.event(input.surv_btn)
     def _run_survival():
-        df   = _data()
-        surv = build_survival_data(df, dead_window_h=float(input.dead_window_h()))
+        df     = _data()
+        window = float(input.dead_window_h())
+        surv   = build_survival_data(df, dead_window_h=window)
         r_surv_df.set(surv)
         r_km_df.set(kaplan_meier_curves(surv))
+        r_flagged.set(flag_ambiguous_deaths(df, dead_window_h=window))
 
     @output
     @render.ui
@@ -668,6 +948,27 @@ def server(input, output, session):
             return render.DataGrid(pd.DataFrame())
         return render.DataGrid(
             logrank_test(surv).round({"test_statistic": 3, "p_value": 6}),
+            width="100%",
+        )
+
+    @output
+    @render.data_frame
+    def flagged_deaths_table():
+        flagged = r_flagged()
+        if flagged is None:
+            return render.DataGrid(pd.DataFrame())
+        if flagged.empty:
+            return render.DataGrid(pd.DataFrame(
+                {"status": ["No animals moved after their inferred death."]}
+            ))
+        return render.DataGrid(
+            flagged.rename(columns={
+                "labels": "condition",
+                "death_day": "inferred_death_day",
+                "post_death_counts": "activity_after_death",
+                "post_death_active_bins": "active_bins_after_death",
+                "last_active_day": "last_movement_day",
+            }),
             width="100%",
         )
 

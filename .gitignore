@@ -27,6 +27,9 @@ htmlcov/
 .idea/
 *.swp
 
+# Claude Code local config / dev-server launch config
+.claude/
+
 # OS
 .DS_Store
 Thumbs.db

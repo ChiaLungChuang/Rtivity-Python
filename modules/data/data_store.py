@@ -16,7 +16,6 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from pathlib import Path
 
-import numpy as np
 import pandas as pd
 
 from .dam_parser import read_dam_file, to_long_format

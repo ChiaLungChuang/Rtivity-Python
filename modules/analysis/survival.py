@@ -7,9 +7,16 @@ Pipeline:
   3. logrank_test()           → pairwise log-rank p-values
   4. survival_summary()       → median survival + CI per group
 
-Death detection: an animal is considered to have died on the last day it was
-active, provided its final `dead_window_h` hours are all inactive.  Animals
-still active at the end of the recording are right-censored.
+Death detection (mirrors R's detect_dead_animals_rle() in
+Survival_analysis_server.R, with the death time taken as the *first* qualifying
+silence rather than the longest): scan the recording forward, and call the
+animal dead at the start of the **first** continuous zero-activity run that
+lasts at least `dead_window_h` hours.  Whether a *later* silent run happens to
+be longer is irrelevant — the first one to cross the threshold marks death.
+If no silent run reaches the threshold the animal is right-censored, regardless
+of whether the recording happens to end in silence.  The scan covers the whole
+DataStore series, which is already trimmed to the user's selected start/finish
+window upstream, so "within the selected period" is enforced by construction.
 
 All tabular outputs use the standard schema where applicable:
     id, labels, order, channel, monitor, x, y
@@ -28,6 +35,35 @@ from lifelines.statistics import multivariate_logrank_test
 
 # ── build per-animal survival table ──────────────────────────────────────────
 
+def _first_lethal_silence(
+    t: np.ndarray, activity: np.ndarray, window_s: float
+) -> float | None:
+    """
+    Return the start time of the **first** contiguous zero-activity run whose
+    span is at least `window_s` seconds, scanning forward. None if no run
+    qualifies.
+
+    A later run being longer does not matter — the first stretch of silence to
+    reach the threshold is the one that marks death.  Span is measured from the
+    first to the last zero sample of the run via `t`, so it does not assume a
+    fixed 1-minute sampling interval the way R's row-count / 60 does.
+    """
+    inactive = activity == 0
+    n = len(inactive)
+    i = 0
+    while i < n:
+        if not inactive[i]:
+            i += 1
+            continue
+        j = i
+        while j + 1 < n and inactive[j + 1]:
+            j += 1
+        if t[j] - t[i] >= window_s:
+            return float(t[i])
+        i = j + 1
+    return None
+
+
 def build_survival_data(
     df: pd.DataFrame,
     dead_window_h: float = 24.0,
@@ -35,17 +71,19 @@ def build_survival_data(
     """
     Infer lifespan from DAM activity data.
 
-    An animal is classified as **dead** if its last `dead_window_h` hours of
-    recording contain zero activity.  Its duration is the experiment_day on
-    which it was last seen moving.
+    An animal is classified as **dead** if any continuous silent run reaches
+    `dead_window_h` hours; death is dated to the experiment_day on which the
+    **first** such run began.  A later, longer silent run does not move the
+    death time.
 
-    Animals still active at the end of the recording are **right-censored**
-    (event = 0) with duration = last recorded experiment_day.
+    Animals whose silent runs never reach the threshold are **right-censored**
+    (event = 0) with duration = last recorded experiment_day — even if the
+    recording happens to end in silence.
 
     Parameters
     ----------
     df            : DataStore.data long-format DataFrame
-    dead_window_h : hours of silence at end of record to call death
+    dead_window_h : minimum hours of unbroken silence to call death
 
     Returns
     -------
@@ -56,23 +94,17 @@ def build_survival_data(
     records  = []
 
     for aid, grp in df.groupby("id", sort=False):
-        meta     = grp[["id", "labels", "order", "channel", "monitor"]].iloc[0]
-        t_max    = grp["t"].max()
-        active   = grp[grp["activity"] > 0]
+        meta = grp[["id", "labels", "order", "channel", "monitor"]].iloc[0]
+        grp  = grp.sort_values("t")
+        t    = grp["t"].to_numpy()
+        act  = grp["activity"].to_numpy()
 
-        if active.empty:
-            # Never active — treat as died on day 0
-            records.append({**meta.to_dict(), "duration": 0, "event": 1})
-            continue
+        death_start = _first_lethal_silence(t, act, window_s)
 
-        # Check whether the final window is completely silent
-        in_window = grp["t"] > (t_max - window_s)
-        dead = not grp.loc[in_window, "activity"].any()
-
-        if dead:
-            last_active_row = active.loc[active["t"].idxmax()]
-            duration = int(last_active_row["experiment_day"])
-            event    = 1
+        if death_start is not None:
+            death_day = grp.loc[grp["t"] == death_start, "experiment_day"].iloc[0]
+            duration  = int(death_day)
+            event     = 1
         else:
             duration = int(grp["experiment_day"].max())
             event    = 0
@@ -80,6 +112,62 @@ def build_survival_data(
         records.append({**meta.to_dict(), "duration": duration, "event": event})
 
     return pd.DataFrame(records)
+
+
+def flag_ambiguous_deaths(
+    df: pd.DataFrame,
+    dead_window_h: float = 24.0,
+) -> pd.DataFrame:
+    """
+    Find dead animals that recorded activity *after* their inferred time of
+    death (the first silence reaching `dead_window_h`).
+
+    build_survival_data() deliberately treats that later movement as artifact
+    and keeps the early death time, so these animals don't show up as unusual
+    in the survival curves. They are flagged here so the user can sanity-check
+    them — a monitor glitch, a dislodged fly, or a threshold set too short can
+    make a living animal look briefly dead.
+
+    Returns one row per flagged animal (empty DataFrame with the right columns
+    if none):
+        id, labels, death_day, post_death_counts,
+        post_death_active_bins, last_active_day
+    """
+    window_s = dead_window_h * 3600.0
+    rows = []
+
+    for aid, grp in df.groupby("id", sort=False):
+        grp = grp.sort_values("t")
+        t   = grp["t"].to_numpy()
+        act = grp["activity"].to_numpy()
+
+        death_start = _first_lethal_silence(t, act, window_s)
+        if death_start is None:
+            continue  # censored / alive
+
+        after = t > death_start
+        post_counts = int(act[after].sum())
+        if post_counts <= 0:
+            continue  # clean death — silent through to the end of the record
+
+        meta = grp[["id", "labels"]].iloc[0]
+        death_day = int(grp.loc[grp["t"] == death_start, "experiment_day"].iloc[0])
+        post_bins = int((after & (act > 0)).sum())
+        last_active_day = int(grp.loc[act > 0, "experiment_day"].iloc[-1])
+
+        rows.append({
+            "id": meta["id"],
+            "labels": meta["labels"],
+            "death_day": death_day,
+            "post_death_counts": post_counts,
+            "post_death_active_bins": post_bins,
+            "last_active_day": last_active_day,
+        })
+
+    return pd.DataFrame(rows, columns=[
+        "id", "labels", "death_day", "post_death_counts",
+        "post_death_active_bins", "last_active_day",
+    ])
 
 
 # ── Kaplan-Meier curves ───────────────────────────────────────────────────────

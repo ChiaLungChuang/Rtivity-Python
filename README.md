@@ -27,7 +27,7 @@ This rewrite covers the four core analysis modules of the original Rtivity and e
 - Chi-squared periodogram (Sokolove-Bushell)
 - Lomb-Scargle periodogram (for unevenly-sampled data)
 - Cosinor regression with amplitude, acrophase, and R²
-- Non-parametric circadian indices: IS (interdaily stability), IV (intradaily variability), RA (relative amplitude)
+- Non-parametric circadian indices: IS (interdaily stability), IV (intradaily variability), RA (relative amplitude) — R computes the same three indices via the `ActCR` package, plus a per-day breakdown this rewrite doesn't yet have (see below)
 - Dominant period detection per animal
 
 **Survival analysis** (`modules/analysis/survival.py`)
@@ -36,13 +36,16 @@ This rewrite covers the four core analysis modules of the original Rtivity and e
 - Pairwise and multi-group log-rank tests
 - Median survival per condition with confidence intervals
 
+**Visual inspection** (`modules/ui/plots.py`)
+- Double-plotted actogram per animal (heatmap, ZT-aligned, standard chronobiology convention)
+- Average daily activity profile (one 24h-wrapped line per condition, with SEM band)
+
 ### What's added vs the R version
 
 - **WASO** (wake after sleep onset) — standard sleep metric, not in original
 - **Lomb-Scargle periodogram** — handles unevenly-sampled or gappy data
 - **Cosinor regression** — amplitude, acrophase, R² fitting
-- **IS / IV / RA** — non-parametric circadian indices used in human actigraphy
-- **Kaplan-Meier with CI + log-rank tests + median survival** — proper biostatistics workflow via lifelines
+- **Kaplan-Meier with CI + log-rank tests + median survival** — R only computes empirical % survival; this rewrite adds proper biostatistics via lifelines
 - **229 unit tests** with property-based assertions (e.g., survival functions are non-increasing, p-values are in [0,1], cosinor amplitudes are non-negative)
 - **Continuous integration** — tests run on every push across Python 3.11, 3.12, and 3.13
 
@@ -50,11 +53,12 @@ This rewrite covers the four core analysis modules of the original Rtivity and e
 
 The following features exist in the [R version](https://github.com/ChiaLungChuang/Rtivity-DAM-sleep-analysis) but are not yet in this Python rewrite:
 
-- **Actogram visualizations** — per-channel activity heatmaps across multiple days
-- **Chronograms** — multi-day rhythm overlay plots
-- **DFA (Detrended Fluctuation Analysis)** — included in the R version via `nonlinearTseries`
-- **Bin converter utility** — small standalone tool
-- **Data integrity / missing-value imputation tab** — the R version's first tab
+- **DFA (Detrended Fluctuation Analysis)** — fractal scaling exponent via `nonlinearTseries`; R also lets you split the fit into two scaling regimes around a chosen time-scale
+- **Per-day breakdown of phase / IS / IV / RA** — R reports these per experiment day in addition to one overall value per animal; this rewrite only computes the overall value
+- **Chronograms beyond the 24h-wrapped daily profile** — R additionally has a *full* (non-wrapped) multi-day chronogram with selectable SEM/SD error bands, a sleep-ratio chronogram, and a cumulative-activity (AUC) plot
+- **Bin converter utility** — standalone tool to re-bin raw DAM data to a coarser time resolution (e.g. 1 min → 30 min), saved back out as a new DAM-format file
+- **Data integrity / missing-value imputation tab** — the R version's first tab; it detects non-numeric/missing activity cells and forward/backward-fills them (LOCF both directions) before analysis. This rewrite's parser does not detect or impute missing cells — it silently treats any unparseable activity value as 0, which is a different (lossier) default, not just a missing feature
+- **Per-tab Excel/figure export** — R can download the statistics table and figure behind almost every plot; this rewrite has no export beyond the Manual Setup metadata download
 
 If you need these, use the R version. Visualization features will be added in v1.0.
 
@@ -127,7 +131,7 @@ Please cite the original publication:
 
 If your work specifically uses methods from this rewrite (Lomb-Scargle, cosinor, IS/IV/RA, lifelines-based survival), please additionally cite this repository:
 
-> Chuang, C.-L. (2026). *Rtivity-Python — Drosophila DAM analysis in Python with Shiny* (Version 0.9.0). Demontis Lab, St. Jude Children's Research Hospital. https://github.com/ChiaLungChuang/Rtivity-Python
+> Chuang, C.-L. (2026). *Rtivity-Python — Drosophila DAM analysis in Python with Shiny* (Version 0.10.0). Demontis Lab, St. Jude Children's Research Hospital. https://github.com/ChiaLungChuang/Rtivity-Python
 
 ## License
 

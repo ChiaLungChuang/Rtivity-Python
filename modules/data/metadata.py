@@ -128,3 +128,159 @@ def time_window_for_file(
     if sub.empty:
         raise KeyError(f"File '{filename}' not found in metadata.")
     return sub["start_datetime"].iloc[0], sub["stop_datetime"].iloc[0]
+
+
+# ── manual metadata builder (UI "Manual Setup" mode, no xlsx upload) ──────────
+#
+# Equivalent to the R app's addcondition observer (Data_selection_server.R):
+# the user repeatedly names a condition and assigns it a set of channels for
+# the currently selected file. Here, a file can have any number of groups
+# (1..N), not a fixed count.
+
+def parse_channel_spec(spec: str) -> list[int]:
+    """
+    Parse a channel spec like '1-16' or '1,3,5-10' into a sorted list of
+    unique 1-based channel numbers.
+
+    Raises
+    ------
+    ValueError : spec is empty, malformed, or contains channels outside 1-32.
+    """
+    spec = (spec or "").strip()
+    if not spec:
+        raise ValueError("Channel spec is empty.")
+
+    channels: set[int] = set()
+    for part in spec.split(","):
+        part = part.strip()
+        if not part:
+            continue
+        if "-" in part:
+            lo_str, hi_str = part.split("-", 1)
+            try:
+                lo, hi = int(lo_str), int(hi_str)
+            except ValueError:
+                raise ValueError(f"Invalid channel range: '{part}'") from None
+            if lo > hi:
+                lo, hi = hi, lo
+            channels.update(range(lo, hi + 1))
+        else:
+            try:
+                channels.add(int(part))
+            except ValueError:
+                raise ValueError(f"Invalid channel number: '{part}'") from None
+
+    if not channels:
+        raise ValueError(f"No channels parsed from spec: '{spec}'")
+    if any(not (1 <= c <= 32) for c in channels):
+        raise ValueError(f"Channel numbers must be between 1 and 32: '{spec}'")
+
+    return sorted(channels)
+
+
+def _normalize_channels(channels) -> list[int]:
+    """
+    Accept either a spec string ('1-16', '1,3,5-10') or an iterable of channel
+    numbers (the checkbox UI hands us a list), and return a sorted, validated,
+    de-duplicated list of 1-based channel numbers in 1..32.
+    """
+    if isinstance(channels, str):
+        return parse_channel_spec(channels)
+
+    try:
+        nums = {int(c) for c in channels}
+    except (TypeError, ValueError):
+        raise ValueError(f"Invalid channel selection: {channels!r}") from None
+    if not nums:
+        raise ValueError("No channels selected.")
+    if any(not (1 <= c <= 32) for c in nums):
+        raise ValueError(f"Channel numbers must be between 1 and 32: {sorted(nums)}")
+    return sorted(nums)
+
+
+def build_manual_conditions(file_entries: list[dict]) -> pd.DataFrame:
+    """
+    Build a conditions DataFrame (same shape as read_metadata()'s return
+    value) from manually entered file/group/channel assignments — used when
+    the user picks "Manual Setup" instead of uploading a metadata .xlsx.
+
+    Parameters
+    ----------
+    file_entries : one dict per DAM file, each shaped:
+        {
+            "file": "Monitor 1.txt",
+            "start_datetime": "2026-06-17 15:28:00",
+            "stop_datetime":  "2026-06-22 10:51:00",
+            "groups": [
+                {"label": "Control", "channels": "1-16"},
+                {"label": "Experimental", "channels": "17-32"},
+                ...                                       # any count, >= 1
+            ],
+        }
+
+    Returns
+    -------
+    DataFrame with columns file, start_datetime, stop_datetime, region_id,
+    labels, order — one row per channel. A label's `order` is assigned by
+    first appearance across all files, so the same condition name on
+    different files shares one order value (mirrors R's behaviour).
+
+    Raises
+    ------
+    ValueError : empty label, unparseable channel spec, channels reused by
+                 more than one group within the same file, or
+                 start_datetime >= stop_datetime.
+    """
+    rows: list[dict] = []
+    label_order: dict[str, int] = {}
+
+    for entry in file_entries:
+        filename = entry["file"]
+
+        start = pd.to_datetime(entry.get("start_datetime"), errors="coerce")
+        stop = pd.to_datetime(entry.get("stop_datetime"), errors="coerce")
+        if pd.isna(start) or pd.isna(stop):
+            raise ValueError(
+                f"{filename}: start/finish datetime could not be parsed."
+            )
+        if start >= stop:
+            raise ValueError(
+                f"{filename}: start datetime must be before finish datetime."
+            )
+
+        groups = entry.get("groups") or []
+        if not groups:
+            raise ValueError(f"{filename}: no conditions defined.")
+
+        seen_channels: set[int] = set()
+        for group in groups:
+            label = (group.get("label") or "").strip()
+            if not label:
+                raise ValueError(f"{filename}: condition name cannot be empty.")
+
+            channels = _normalize_channels(group.get("channels", ""))
+            overlap = seen_channels & set(channels)
+            if overlap:
+                raise ValueError(
+                    f"{filename}: channel(s) {sorted(overlap)} assigned to "
+                    "more than one condition."
+                )
+            seen_channels.update(channels)
+
+            if label not in label_order:
+                label_order[label] = len(label_order) + 1
+
+            for ch in channels:
+                rows.append({
+                    "file": filename,
+                    "start_datetime": start,
+                    "stop_datetime": stop,
+                    "region_id": ch,
+                    "labels": label,
+                    "order": label_order[label],
+                })
+
+    if not rows:
+        raise ValueError("No conditions defined for any file.")
+
+    return pd.DataFrame(rows)
