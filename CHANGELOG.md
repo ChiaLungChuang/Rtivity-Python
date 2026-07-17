@@ -3,6 +3,42 @@
 All notable changes to Rtivity-Python are recorded here.
 This project loosely follows [Semantic Versioning](https://semver.org/).
 
+## [0.11.0] — 2026-06-25
+
+Second pass after the first end-to-end run on real data: fixes a crash that
+broke every plot, adds R-style per-metric Excel export, handles the
+no-deaths case, and reorders the tabs. All 279 unit tests pass.
+
+### Added
+
+- **Per-metric Excel export matching the R Rtivity format.** Every analysis tab
+  (Activity, Sleep, Rhythm, Survival) now has a **Download** button that writes a
+  multi-sheet `.xlsx`: `Settings`, `Statistics` (N / mean / SEM / SD / median /
+  quartiles per condition × level), `All data` (one row per animal, one column
+  per level, with File/Labels/Channels/Start/End), and one sheet per level laid
+  out condition-by-animal for direct paste into GraphPad Prism. Mirrors the R
+  download (e.g. "Sleep ratio per light phase"). Survival exports a per-animal
+  duration/event table plus median-survival, log-rank, and flagged-animal
+  sheets. (`modules/data/export.py` `write_metric_workbook`; `app.py` `dl_*`
+  handlers)
+
+### Fixed
+
+- **Every plot crashed with "Value function must be callable."** The render
+  outputs `km_plot`, `actogram_plot`, and `daily_profile_plot` shared names with
+  the imported Plotly helpers, so each ended up calling itself (a linter had
+  also stripped the now-"unused" imports, compounding it). The Kaplan-Meier
+  curve, actogram, and daily-profile plots were all affected. Fixed by aliasing
+  the imports (`plot_km` / `plot_actogram` / `plot_daily_profile`). This only
+  surfaced once data loading started working.
+- **No feedback when no animal dies.** The Survival tab now shows "There is no
+  death animal detected at this silence window" (and the median/log-rank tables
+  say so too) instead of an empty Kaplan-Meier plot and blank median rows.
+
+### Changed
+
+- **Survival analysis moved to the second tab**, right after Data selection.
+
 ## [0.10.0] — 2026-06-25
 
 This release overhauls the Data-selection tab's manual metadata setup, fixes

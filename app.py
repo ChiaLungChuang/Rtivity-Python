@@ -26,6 +26,7 @@ sys.path.insert(0, str(Path(__file__).parent))
 
 from modules.data.dam_parser import get_time_range
 from modules.data.data_store import DataStore, Settings
+from modules.data.export import write_metric_workbook
 from modules.data.metadata import build_manual_conditions
 from modules.analysis.activity import (
     activity_by_day,
@@ -71,7 +72,10 @@ from modules.analysis.survival import (
     median_survival,
 )
 from modules.ui.plots import (
+    actogram_plot as plot_actogram,
     box_plot,
+    daily_profile_plot as plot_daily_profile,
+    km_plot as plot_km,
     periodogram_plot,
 )
 
@@ -208,131 +212,7 @@ app_ui = ui.page_navbar(
         ),
     ),
 
-    # ── Tab 2 · Visual inspection ─────────────────────────────────────────────
-    ui.nav_panel(
-        "Visual inspection",
-        ui.layout_sidebar(
-            _sidebar_card(
-                ui.input_select("vis_animal", "Animal", choices=[]),
-                ui.input_numeric("vis_bin_min", "Bin size (min)", 30,
-                                 min=1, max=120, step=1),
-                ui.hr(),
-                ui.input_select("vis_group", "Group for daily profile",
-                                choices=[]),
-                ui.input_numeric("vis_profile_bin",
-                                 "Profile bin size (min)", 30,
-                                 min=1, max=120, step=1),
-                title="Controls",
-            ),
-            ui.card(
-                ui.h5("Actogram"),
-                ui.output_ui("actogram_plot"),
-                ui.hr(),
-                ui.h5("Average Daily Activity Profile"),
-                ui.output_ui("daily_profile_plot"),
-            ),
-        ),
-    ),
-
-    # ── Tab 3 · Activity analysis ─────────────────────────────────────────────
-    ui.nav_panel(
-        "Activity analysis",
-        ui.layout_sidebar(
-            _sidebar_card(
-                ui.input_slider("act_bout_window",
-                                "Bout gap threshold (min)", 0.5, 60, 5, step=0.5),
-                ui.input_action_button("act_analyse_btn",
-                                       "Run bout detection",
-                                       class_="btn btn-primary w-100 mb-3"),
-                ui.hr(),
-                ui.input_select("act_groupby", "Group by",
-                                {"phase": "Light / Dark",
-                                 "day": "Experiment day",
-                                 "day_phase": "Day × Phase"}),
-                ui.input_select("act_metric", "Metric",
-                                {"total": "Total activity",
-                                 "bout_activity": "Activity per bout",
-                                 "bout_duration": "Bout duration (s)"}),
-                ui.input_action_button("act_plot_btn", "Update plot",
-                                       class_="btn btn-dark w-100"),
-                title="Controls",
-            ),
-            ui.card(
-                ui.output_ui("activity_plot"),
-                ui.hr(),
-                ui.h6("Descriptive statistics"),
-                ui.output_data_frame("activity_stats"),
-            ),
-        ),
-    ),
-
-    # ── Tab 4 · Sleep analysis ────────────────────────────────────────────────
-    ui.nav_panel(
-        "Sleep analysis",
-        ui.layout_sidebar(
-            _sidebar_card(
-                ui.input_slider("sleep_threshold", "Sleep threshold (min)", 1, 60, 5),
-                ui.input_action_button("sleep_analyse_btn",
-                                       "Run sleep annotation",
-                                       class_="btn btn-primary w-100 mb-3"),
-                ui.hr(),
-                ui.input_select("sleep_groupby", "Group by",
-                                {"phase": "Light / Dark",
-                                 "day": "Experiment day",
-                                 "day_phase": "Day × Phase"}),
-                ui.input_select("sleep_metric", "Metric",
-                                {"ratio": "Sleep ratio",
-                                 "tst": "Total sleep time (h)",
-                                 "waso": "Wake after sleep onset (h)",
-                                 "latency": "Sleep latency (min)",
-                                 "bout_duration": "Sleep bout duration (min)",
-                                 "bout_count": "Sleep bout count"}),
-                ui.input_action_button("sleep_plot_btn", "Update plot",
-                                       class_="btn btn-dark w-100"),
-                title="Controls",
-            ),
-            ui.card(
-                ui.output_ui("sleep_plot"),
-                ui.hr(),
-                ui.h6("Descriptive statistics"),
-                ui.output_data_frame("sleep_stats"),
-            ),
-        ),
-    ),
-
-    # ── Tab 5 · Rhythm analysis ───────────────────────────────────────────────
-    ui.nav_panel(
-        "Rhythm analysis",
-        ui.layout_sidebar(
-            _sidebar_card(
-                ui.input_select("rhythm_method", "Periodogram method",
-                                {"chi_sq": "Chi-square (Sokolove & Bushell)",
-                                 "lomb_scargle": "Lomb-Scargle"}),
-                ui.input_numeric("rhythm_period_from", "Period range — from (h)",
-                                 16.0, min=1, max=48),
-                ui.input_numeric("rhythm_period_to", "Period range — to (h)",
-                                 32.0, min=1, max=96),
-                ui.input_numeric("rhythm_period_step", "Step (h)",
-                                 0.5, min=0.1, max=2, step=0.1),
-                ui.input_action_button("rhythm_btn", "Run analysis",
-                                       class_="btn btn-primary w-100 mb-3"),
-                ui.hr(),
-                ui.input_select("rhythm_view", "View",
-                                {"periodogram": "Periodogram",
-                                 "dominant_period": "Dominant period",
-                                 "cosinor": "Cosinor fit",
-                                 "is_iv_ra": "IS / IV / RA"}),
-                title="Controls",
-            ),
-            ui.card(
-                ui.output_ui("rhythm_plot"),
-                ui.hr(),
-                ui.output_data_frame("rhythm_table"),
-            ),
-        ),
-    ),
-
-    # ── Tab 6 · Survival analysis ─────────────────────────────────────────────
+    # ── Tab 2 · Survival analysis ─────────────────────────────────────────────
     ui.nav_panel(
         "Survival analysis",
         ui.layout_sidebar(
@@ -363,6 +243,138 @@ app_ui = ui.page_navbar(
                      "animal. An empty table means no such outliers.",
                      class_="text-muted small"),
                 ui.output_data_frame("flagged_deaths_table"),
+                ui.download_button("dl_survival", "Download survival (.xlsx)",
+                                   class_="btn btn-outline-secondary btn-sm mt-2"),
+            ),
+        ),
+    ),
+
+    # ── Tab 3 · Visual inspection ─────────────────────────────────────────────
+    ui.nav_panel(
+        "Visual inspection",
+        ui.layout_sidebar(
+            _sidebar_card(
+                ui.input_select("vis_animal", "Animal", choices=[]),
+                ui.input_numeric("vis_bin_min", "Bin size (min)", 30,
+                                 min=1, max=120, step=1),
+                ui.hr(),
+                ui.input_select("vis_group", "Group for daily profile",
+                                choices=[]),
+                ui.input_numeric("vis_profile_bin",
+                                 "Profile bin size (min)", 30,
+                                 min=1, max=120, step=1),
+                title="Controls",
+            ),
+            ui.card(
+                ui.h5("Actogram"),
+                ui.output_ui("actogram_plot"),
+                ui.hr(),
+                ui.h5("Average Daily Activity Profile"),
+                ui.output_ui("daily_profile_plot"),
+            ),
+        ),
+    ),
+
+    # ── Tab 4 · Activity analysis ─────────────────────────────────────────────
+    ui.nav_panel(
+        "Activity analysis",
+        ui.layout_sidebar(
+            _sidebar_card(
+                ui.input_slider("act_bout_window",
+                                "Bout gap threshold (min)", 0.5, 60, 5, step=0.5),
+                ui.input_action_button("act_analyse_btn",
+                                       "Run bout detection",
+                                       class_="btn btn-primary w-100 mb-3"),
+                ui.hr(),
+                ui.input_select("act_groupby", "Group by",
+                                {"phase": "Light / Dark",
+                                 "day": "Experiment day",
+                                 "day_phase": "Day × Phase"}),
+                ui.input_select("act_metric", "Metric",
+                                {"total": "Total activity",
+                                 "bout_activity": "Activity per bout",
+                                 "bout_duration": "Bout duration (s)"}),
+                ui.input_action_button("act_plot_btn", "Update plot",
+                                       class_="btn btn-dark w-100"),
+                title="Controls",
+            ),
+            ui.card(
+                ui.output_ui("activity_plot"),
+                ui.hr(),
+                ui.h6("Descriptive statistics"),
+                ui.output_data_frame("activity_stats"),
+                ui.download_button("dl_activity", "Download metric (.xlsx)",
+                                   class_="btn btn-outline-secondary btn-sm mt-2"),
+            ),
+        ),
+    ),
+
+    # ── Tab 5 · Sleep analysis ────────────────────────────────────────────────
+    ui.nav_panel(
+        "Sleep analysis",
+        ui.layout_sidebar(
+            _sidebar_card(
+                ui.input_slider("sleep_threshold", "Sleep threshold (min)", 1, 60, 5),
+                ui.input_action_button("sleep_analyse_btn",
+                                       "Run sleep annotation",
+                                       class_="btn btn-primary w-100 mb-3"),
+                ui.hr(),
+                ui.input_select("sleep_groupby", "Group by",
+                                {"phase": "Light / Dark",
+                                 "day": "Experiment day",
+                                 "day_phase": "Day × Phase"}),
+                ui.input_select("sleep_metric", "Metric",
+                                {"ratio": "Sleep ratio",
+                                 "tst": "Total sleep time (h)",
+                                 "waso": "Wake after sleep onset (h)",
+                                 "latency": "Sleep latency (min)",
+                                 "bout_duration": "Sleep bout duration (min)",
+                                 "bout_count": "Sleep bout count"}),
+                ui.input_action_button("sleep_plot_btn", "Update plot",
+                                       class_="btn btn-dark w-100"),
+                title="Controls",
+            ),
+            ui.card(
+                ui.output_ui("sleep_plot"),
+                ui.hr(),
+                ui.h6("Descriptive statistics"),
+                ui.output_data_frame("sleep_stats"),
+                ui.download_button("dl_sleep", "Download metric (.xlsx)",
+                                   class_="btn btn-outline-secondary btn-sm mt-2"),
+            ),
+        ),
+    ),
+
+    # ── Tab 6 · Rhythm analysis ───────────────────────────────────────────────
+    ui.nav_panel(
+        "Rhythm analysis",
+        ui.layout_sidebar(
+            _sidebar_card(
+                ui.input_select("rhythm_method", "Periodogram method",
+                                {"chi_sq": "Chi-square (Sokolove & Bushell)",
+                                 "lomb_scargle": "Lomb-Scargle"}),
+                ui.input_numeric("rhythm_period_from", "Period range — from (h)",
+                                 16.0, min=1, max=48),
+                ui.input_numeric("rhythm_period_to", "Period range — to (h)",
+                                 32.0, min=1, max=96),
+                ui.input_numeric("rhythm_period_step", "Step (h)",
+                                 0.5, min=0.1, max=2, step=0.1),
+                ui.input_action_button("rhythm_btn", "Run analysis",
+                                       class_="btn btn-primary w-100 mb-3"),
+                ui.hr(),
+                ui.input_select("rhythm_view", "View",
+                                {"periodogram": "Periodogram",
+                                 "dominant_period": "Dominant period",
+                                 "cosinor": "Cosinor fit",
+                                 "is_iv_ra": "IS / IV / RA"}),
+                title="Controls",
+            ),
+            ui.card(
+                ui.output_ui("rhythm_plot"),
+                ui.hr(),
+                ui.output_data_frame("rhythm_table"),
+                ui.download_button("dl_rhythm", "Download metric (.xlsx)",
+                                   class_="btn btn-outline-secondary btn-sm mt-2"),
             ),
         ),
     ),
@@ -688,14 +700,14 @@ def server(input, output, session):
         aid = input.vis_animal()
         if not aid:
             return ui.p("Select an animal.", class_="text-muted")
-        fig = actogram_plot(df, aid, bin_min=int(input.vis_bin_min()))
+        fig = plot_actogram(df, aid, bin_min=int(input.vis_bin_min()))
         return _fig_html(fig)
 
     @output
     @render.ui
     def daily_profile_plot():
         df = _data()
-        fig = daily_profile_plot(df, bin_min=int(input.vis_profile_bin()))
+        fig = plot_daily_profile(df, bin_min=int(input.vis_profile_bin()))
         return _fig_html(fig)
 
     # ── activity analysis ─────────────────────────────────────────────────────
@@ -922,13 +934,27 @@ def server(input, output, session):
         r_km_df.set(kaplan_meier_curves(surv))
         r_flagged.set(flag_ambiguous_deaths(df, dead_window_h=window))
 
+    def _no_deaths() -> bool:
+        surv = r_surv_df()
+        return surv is not None and int(surv["event"].sum()) == 0
+
     @output
     @render.ui
     def km_plot():
+        surv = r_surv_df()
         km = r_km_df()
-        if km is None:
+        if surv is None or km is None:
             return ui.p("Click Run survival analysis.", class_="text-muted")
-        return _fig_html(km_plot(km))
+        if _no_deaths():
+            return ui.div(
+                ui.p("There is no death animal detected at this silence window.",
+                     class_="text-warning fw-bold"),
+                ui.p("All animals stayed active through the recording (they are "
+                     "right-censored). If you expect deaths, try a shorter "
+                     "silence window or a longer recording.",
+                     class_="text-muted small"),
+            )
+        return _fig_html(plot_km(km))
 
     @output
     @render.data_frame
@@ -936,6 +962,9 @@ def server(input, output, session):
         surv = r_surv_df()
         if surv is None:
             return render.DataGrid(pd.DataFrame())
+        if _no_deaths():
+            return render.DataGrid(pd.DataFrame(
+                {"status": ["No death animal detected — median survival is undefined."]}))
         df = median_survival(surv)[["labels", "x", "y", "ci_lower", "ci_upper"]]
         df = df.rename(columns={"x": "group", "y": "median_days"}).round(2)
         return render.DataGrid(df, width="100%")
@@ -946,6 +975,9 @@ def server(input, output, session):
         surv = r_surv_df()
         if surv is None:
             return render.DataGrid(pd.DataFrame())
+        if _no_deaths():
+            return render.DataGrid(pd.DataFrame(
+                {"status": ["No death animal detected — log-rank test is not applicable."]}))
         return render.DataGrid(
             logrank_test(surv).round({"test_statistic": 3, "p_value": 6}),
             width="100%",
@@ -971,6 +1003,116 @@ def server(input, output, session):
             }),
             width="100%",
         )
+
+    # ── metric downloads (R-style multi-sheet .xlsx) ──────────────────────────
+
+    def _settings_rows() -> list[tuple[str, object]]:
+        return [
+            ("LD cycle (h)", float(input.ld_period())),
+            ("Light hours per cycle (h)", float(input.light_hours())),
+            ("Sleep threshold (min)", int(input.sleep_threshold_setting())),
+            ("Activity bout gap threshold (min)", int(input.bout_threshold_setting())),
+            ("Light onset (ZT0)", input.zt0()),
+        ]
+
+    def _dates_by_id() -> dict[str, tuple[str, str]]:
+        df = _data()
+        return {
+            aid: (str(s.min()), str(s.max()))
+            for aid, s in df.groupby("id", sort=False)["datetime"]
+        }
+
+    def _yield_xlsx(write_fn):
+        """Run write_fn(tmp_path) and stream the resulting file, then clean up."""
+        tmp = Path(tempfile.mkstemp(suffix=".xlsx")[1])
+        try:
+            write_fn(tmp)
+            yield tmp.read_bytes()
+        finally:
+            tmp.unlink(missing_ok=True)
+
+    def _safe(fetch):
+        """Fetch a summary, swallowing the reactive 'not computed yet' signal."""
+        try:
+            return fetch()
+        except Exception:
+            return None
+
+    @output
+    @render.download(filename=lambda: "activity_metric.xlsx")
+    def dl_activity():
+        summary = _safe(_activity_summary)
+        if summary is None or summary.empty:
+            ui.notification_show("Update the plot first, then download.",
+                                 type="warning")
+            return
+        yield from _yield_xlsx(lambda p: write_metric_workbook(
+            p, summary, _settings_rows(), _dates_by_id()))
+
+    @output
+    @render.download(filename=lambda: "sleep_metric.xlsx")
+    def dl_sleep():
+        summary = _safe(_sleep_summary)
+        if summary is None or summary.empty:
+            ui.notification_show("Run sleep annotation and update the plot first.",
+                                 type="warning")
+            return
+        yield from _yield_xlsx(lambda p: write_metric_workbook(
+            p, summary, _settings_rows(), _dates_by_id()))
+
+    @output
+    @render.download(filename=lambda: "rhythm_metric.xlsx")
+    def dl_rhythm():
+        view = input.rhythm_view()
+        if view == "cosinor":
+            summary = r_cosinor()
+        elif view == "is_iv_ra":
+            summary = r_isivra()
+        elif view == "dominant_period":
+            summary = _safe(lambda: dominant_period_by_animal(_data())
+                            .assign(x="Dominant period (h)"))
+        else:  # periodogram — a curve per animal, not the standard summary schema
+            ui.notification_show(
+                "Switch the View to Cosinor, IS/IV/RA, or Dominant period to "
+                "download a metric table.", type="warning")
+            return
+        if summary is None or summary.empty:
+            ui.notification_show("Click Run analysis first.", type="warning")
+            return
+        yield from _yield_xlsx(lambda p: write_metric_workbook(
+            p, summary, _settings_rows(), _dates_by_id()))
+
+    @output
+    @render.download(filename=lambda: "survival.xlsx")
+    def dl_survival():
+        surv = r_surv_df()
+        if surv is None:
+            ui.notification_show("Run survival analysis first.", type="warning")
+            return
+
+        def _write(path):
+            settings_df = pd.DataFrame(
+                _settings_rows() + [("Silence window to call death (h)",
+                                     float(input.dead_window_h()))],
+                columns=["Settings", "Values"])
+            per_animal = surv[["id", "labels", "channel", "monitor",
+                               "duration", "event"]].rename(columns={
+                "labels": "condition", "duration": "duration_days",
+                "event": "died"})
+            with pd.ExcelWriter(path, engine="openpyxl") as xw:
+                settings_df.to_excel(xw, sheet_name="Settings", index=False)
+                per_animal.to_excel(xw, sheet_name="Per animal", index=False)
+                if not _no_deaths():
+                    median_survival(surv).rename(
+                        columns={"x": "group", "y": "median_days"}
+                    ).to_excel(xw, sheet_name="Median survival", index=False)
+                    logrank_test(surv).to_excel(
+                        xw, sheet_name="Log-rank", index=False)
+                flagged = r_flagged()
+                if flagged is not None and not flagged.empty:
+                    flagged.to_excel(xw, sheet_name="Flagged animals", index=False)
+
+        yield from _yield_xlsx(_write)
 
 
 # ══════════════════════════════════════════════════════════════════════════════

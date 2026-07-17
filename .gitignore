@@ -36,3 +36,9 @@ Thumbs.db
 
 # Logs
 *.log
+
+# Accidental nested clone of this repo (441MB) — remove from disk when convenient
+/Rtivity-Python/
+
+# User-provided reference exports (not app source)
+/Download file examples/

@@ -58,7 +58,7 @@ The following features exist in the [R version](https://github.com/ChiaLungChuan
 - **Chronograms beyond the 24h-wrapped daily profile** — R additionally has a *full* (non-wrapped) multi-day chronogram with selectable SEM/SD error bands, a sleep-ratio chronogram, and a cumulative-activity (AUC) plot
 - **Bin converter utility** — standalone tool to re-bin raw DAM data to a coarser time resolution (e.g. 1 min → 30 min), saved back out as a new DAM-format file
 - **Data integrity / missing-value imputation tab** — the R version's first tab; it detects non-numeric/missing activity cells and forward/backward-fills them (LOCF both directions) before analysis. This rewrite's parser does not detect or impute missing cells — it silently treats any unparseable activity value as 0, which is a different (lossier) default, not just a missing feature
-- **Per-tab Excel/figure export** — R can download the statistics table and figure behind almost every plot; this rewrite has no export beyond the Manual Setup metadata download
+- **Per-tab *figure* export** — the Activity, Sleep, Rhythm, and Survival tabs now export their statistics/data workbooks (the R multi-sheet `.xlsx` layout), but downloading the rendered figure image itself is not yet implemented
 
 If you need these, use the R version. Visualization features will be added in v1.0.
 
@@ -131,7 +131,7 @@ Please cite the original publication:
 
 If your work specifically uses methods from this rewrite (Lomb-Scargle, cosinor, IS/IV/RA, lifelines-based survival), please additionally cite this repository:
 
-> Chuang, C.-L. (2026). *Rtivity-Python — Drosophila DAM analysis in Python with Shiny* (Version 0.10.0). Demontis Lab, St. Jude Children's Research Hospital. https://github.com/ChiaLungChuang/Rtivity-Python
+> Chuang, C.-L. (2026). *Rtivity-Python — Drosophila DAM analysis in Python with Shiny* (Version 0.11.0). Demontis Lab, St. Jude Children's Research Hospital. https://github.com/ChiaLungChuang/Rtivity-Python
 
 ## License
 
