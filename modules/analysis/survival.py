@@ -66,7 +66,7 @@ def _first_lethal_silence(
 
 def build_survival_data(
     df: pd.DataFrame,
-    dead_window_h: float = 24.0,
+    dead_window_h: float = 12.0,
 ) -> pd.DataFrame:
     """
     Infer lifespan from DAM activity data.
@@ -116,7 +116,7 @@ def build_survival_data(
 
 def flag_ambiguous_deaths(
     df: pd.DataFrame,
-    dead_window_h: float = 24.0,
+    dead_window_h: float = 12.0,
 ) -> pd.DataFrame:
     """
     Find dead animals that recorded activity *after* their inferred time of
