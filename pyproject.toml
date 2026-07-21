@@ -19,6 +19,21 @@ classifiers = [
     "Topic :: Scientific/Engineering :: Bio-Informatics",
     "Operating System :: OS Independent",
 ]
+dependencies = [
+    "pandas>=2.2,<3.0",
+    "numpy>=1.26,<3.0",
+    "scipy>=1.13,<2.0",
+    "lifelines>=0.30,<1.0",
+    "openpyxl>=3.1,<4.0",
+]
+
+[project.optional-dependencies]
+# The Shiny app and plotting stack — a whole web framework — is not needed to
+# import and use the analysis core. Keeping it in an extra means an MCP server (or
+# anyone citing the analysis functions) installs numpy/pandas/scipy/lifelines and
+# nothing else.
+app = ["shiny>=1.6,<2.0", "plotly>=6.0,<7.0"]
+dev = ["pytest>=8.0,<10.0"]
 
 [project.urls]
 Repository = "https://github.com/ChiaLungChuang/Rtivity-Python"
@@ -28,6 +43,12 @@ Repository = "https://github.com/ChiaLungChuang/Rtivity-Python"
 [build-system]
 requires = ["setuptools>=61.0"]
 build-backend = "setuptools.build_meta"
+
+# Flat layout: the importable package is `modules`. Without this, setuptools
+# auto-discovery fails on the flat repo (app.py, tests/, examples at the root) and
+# a wheel ships no code — the defect this section fixes.
+[tool.setuptools.packages.find]
+include = ["modules*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

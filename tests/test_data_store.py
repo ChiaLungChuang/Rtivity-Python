@@ -17,11 +17,7 @@ pytestmark = pytest.mark.skipif(
 )
 
 
-@pytest.fixture(scope="module")
-def store():
-    s = DataStore(dam_dir=DAM_DIR, settings=Settings())
-    s.load_from_metadata(META_PATH)
-    return s
+# `store` is the session-scoped fixture in conftest.py (loaded once for the run).
 
 
 class TestDataStore:

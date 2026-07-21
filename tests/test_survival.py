@@ -8,7 +8,6 @@ import pandas as pd
 import pytest
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
-from modules.data.data_store import DataStore, Settings
 from modules.analysis.survival import (
     build_survival_data,
     kaplan_meier_curves,
@@ -26,11 +25,7 @@ pytestmark = pytest.mark.skipif(
 )
 
 
-@pytest.fixture(scope="module")
-def data():
-    store = DataStore(dam_dir=DAM_DIR, settings=Settings())
-    store.load_from_metadata(META_PATH)
-    return store.data
+# `data` is the session-scoped fixture in conftest.py (loaded once for the run).
 
 
 @pytest.fixture(scope="module")
