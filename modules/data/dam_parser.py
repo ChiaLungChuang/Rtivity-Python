@@ -1,18 +1,26 @@
 """
 DAM file parser — replaces the R `damr` package.
 
-DAM (Drosophila Activity Monitor) files from Trikinetics have this format
-(whitespace-delimited, no header):
+DAM (Drosophila Activity Monitor) files from Trikinetics are TAB-delimited, 42
+fields per row, no header (1-indexed field numbers, as `awk -F'\t'` counts them):
 
-  col 0  : row index
-  col 1  : day   (e.g. 3)
-  col 2  : month (e.g. May)
-  col 3  : year  (2-digit, e.g. 21)
-  col 4  : time  (HH:MM:SS)
-  col 5  : status (1 = normal, other values may indicate issues)
-  col 6-8: unused flags
-  col 9  : label ("Ct")
-  col 10-41: activity counts for channels 1–32
+  1      : row index
+  2      : date (e.g. "28 Jan 26")
+  3      : time (HH:MM:SS)
+  4      : status (1 = normal, other values may indicate issues)
+  5      : extras
+  6      : monitor number
+  7      : tube (unused)
+  8      : data type ("Ct" for counts)
+  9      : unused
+  10     : light sensor (0/1)
+  11-42  : activity counts for channels 1–32
+
+Count fields with a TAB separator. Split on whitespace instead and the date
+becomes three fields (day, month, year) — 44 in all — and every column number
+after it moves by two. Versions up to v0.12.0 mixed the two views and read
+channel k from field 10 + k - 1: channel 1 was the light sensor, channel k was
+tube k - 1, and channel 32 was never read (fixed in v0.12.1).
 """
 
 from __future__ import annotations
@@ -139,14 +147,14 @@ def get_time_range(path: str | Path) -> tuple[pd.Timestamp, pd.Timestamp]:
 def _read_raw(path: Path) -> pd.DataFrame:
     """Read DAM file into a normalised DataFrame.
 
-    DAM files are TAB-delimited with 42 fields per row (no header):
-      [0]  : row index
-      [1]  : date string  e.g. "3 May 21"
-      [2]  : time         e.g. "11:09:00"
-      [3]  : status       (1 = normal, 24 = first row of recording)
-      [4-8]: unused flags / label
-      [9-40]: activity counts for channels 1–32
-      [41] : trailing field (ignored)
+    DAM files are TAB-delimited with 42 fields per row (no header); 0-indexed:
+      [0]    : row index
+      [1]    : date string  e.g. "3 May 21"
+      [2]    : time         e.g. "11:09:00"
+      [3]    : status       (1 = normal, 24 = first row of recording)
+      [4-8]  : extras, monitor number, tube, data type ("Ct"), unused
+      [9]    : light sensor (0/1) — NOT a channel
+      [10-41]: activity counts for channels 1–32
     """
     try:
         raw = pd.read_csv(
@@ -172,7 +180,7 @@ def _read_raw(path: Path) -> pd.DataFrame:
     df["status"]   = pd.to_numeric(raw.iloc[:, 3], errors="coerce").fillna(0).astype(int)
 
     for i, col in enumerate(_CHANNEL_COLS):
-        df[col] = pd.to_numeric(raw.iloc[:, 9 + i], errors="coerce").fillna(0).astype(int)
+        df[col] = pd.to_numeric(raw.iloc[:, 10 + i], errors="coerce").fillna(0).astype(int)
 
     return df
 

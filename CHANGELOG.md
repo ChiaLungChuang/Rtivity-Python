@@ -3,6 +3,38 @@
 All notable changes to Rtivity-Python are recorded here.
 This project loosely follows [Semantic Versioning](https://semver.org/).
 
+## [0.12.1] — 2026-11-01
+
+### Fixed
+
+- **Every channel was read from the wrong column.** `dam_parser._read_raw` took
+  channel *k* from tab field `9 + k` (0-indexed), but in a 42-field DAM2 file
+  0-indexed field 9 is the **light sensor** and channels are fields 10–41. So
+  channel 1 carried the light column (0/1 per read), channel *k* carried tube
+  *k − 1*, and tube 32 was never read. Every activity, sleep, rhythm and
+  survival result is affected. Confirmed on three genuine rig exports: on a
+  file whose light column varies, "channel 1" summed to exactly the number of
+  lit reads. The docstrings described two incompatible layouts — a
+  whitespace-split view (date as three fields, 44 in all) and a tab view with a
+  non-existent trailing field — and the offset came from mixing them; both are
+  rewritten to the tab layout. (`modules/data/dam_parser.py`)
+- **The package reported the wrong version.** `pyproject.toml` still said
+  0.11.0 under the v0.12.0 tag, so `pip show rtivity-python` reported 0.11.0.
+  It now says 0.12.1.
+
+### Added
+
+- `tests/test_dam_parser_columns.py`: a synthetic DAM2 file built in the test,
+  with distinct values in the light field, the field before it and every
+  channel, so any one-column shift fails. Runs everywhere — unlike the existing
+  parser tests, which need `~/Desktop/Rtivity_main` and skip without it (in CI,
+  256 of 279 tests skip). All 35 fail on v0.12.0.
+
+### Note on v0.12.0
+
+v0.12.0 was tagged without a changelog entry. It contained the survival
+default death window change (24 h → 12 h) and the session-scoped test fixture.
+
 ## [0.11.0] — 2026-06-25
 
 Second pass after the first end-to-end run on real data: fixes a crash that
