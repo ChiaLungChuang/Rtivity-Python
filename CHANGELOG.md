@@ -3,6 +3,49 @@
 All notable changes to Rtivity-Python are recorded here.
 This project loosely follows [Semantic Versioning](https://semver.org/).
 
+## [0.13.0] — 2026-11-03
+
+A **metric definition change**, hence the minor version: sleep and activity
+results computed with 0.13.0 are not comparable with results from 0.12.x or
+earlier, at any bin width.
+
+### Changed
+
+- **A run of n bins now lasts n × bin width.** `_inactive_bouts`,
+  `_state_bouts` (sleep) and `_raw_bouts` (activity) ended a run at the
+  timestamp of its last read and measured it as t_last − t_first — the gaps
+  between reads, not the reads — so every bout was one bin short. A DAM read
+  summarises the bin ending at its timestamp. Runs now end one bin after their
+  last read (an exclusive end), with the bin width taken from the timestamps
+  (median gap; `modules/analysis/bins.py`), never assumed. Effects:
+  - the sleep rule (`threshold_min`, default 5) now means what it says: five
+    quiet 60 s bins, or ten quiet 30 s bins, are sleep. It used to need six
+    60 s bins (really 6 min) or eleven 30 s bins (5.5 min);
+  - every sleep bout, wake bout and activity bout is one bin longer: a
+    ten-minute bout measures 600 s at 30 s and at 60 s bins (was 570 s and
+    540 s);
+  - activity bouts are bridged across quiet gaps of up to `threshold_min`
+    minutes exactly (was one bin less).
+- **60 s data is affected, not only 30 s.** On a synthetic 60 s monitor
+  (damsim, 32 channels, 3 days) mean total sleep rose 17–21 % per group, sleep
+  bouts went from 148 to 279 (the 131 new bouts are exactly the five-bin quiet
+  runs the old rule rejected: 655 more asleep rows = 131 × 5), and activity
+  bouts went from 306 to 175 as five-bin gaps are now bridged. Size on real
+  data depends on how many quiet runs sit at the threshold.
+
+### Not changed
+
+- `survival._first_lethal_silence` measures a silent run the same
+  t_last − t_first way, so the death window is one bin longer than
+  `dead_window_h` says (one minute in twelve hours at 60 s bins). Recorded, not
+  changed in this release.
+
+### Added
+
+- `tests/test_bin_width.py`: fourteen tests on frames built in the test (no
+  external data, so all run in CI). The first three were committed failing in
+  PR #2; on 0.12.1 seven of the fourteen fail.
+
 ## [0.12.1] — 2026-11-01
 
 ### Fixed
