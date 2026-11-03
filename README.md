@@ -131,7 +131,7 @@ Please cite the original publication:
 
 If your work specifically uses methods from this rewrite (Lomb-Scargle, cosinor, IS/IV/RA, lifelines-based survival), please additionally cite this repository:
 
-> Chuang, C.-L. (2026). *Rtivity-Python — Drosophila DAM analysis in Python with Shiny* (Version 0.12.1). Demontis Lab, St. Jude Children's Research Hospital. https://github.com/ChiaLungChuang/Rtivity-Python
+> Chuang, C.-L. (2026). *Rtivity-Python — Drosophila DAM analysis in Python with Shiny* (Version 0.13.0). Demontis Lab, St. Jude Children's Research Hospital. https://github.com/ChiaLungChuang/Rtivity-Python
 
 ## License
 
