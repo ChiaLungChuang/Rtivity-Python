@@ -146,3 +146,46 @@ def test_runs_end_one_bin_after_their_last_read():
     t = np.arange(6) * 30.0
     assert runs(np.array([False, True, True, False, True, True]), t) == [
         (30.0, 90.0), (120.0, 180.0)]
+
+
+# ── the survival death window (0.13.0) ────────────────────────────────────────
+#
+# `_first_lethal_silence` measured a silent run as t_last - t_first, so a fly
+# had to be silent one bin LONGER than `dead_window_h` to be called dead. The
+# same definition as the bouts applies: n silent bins last n x bin width, and a
+# run qualifies exactly when that reaches the window.
+
+from modules.analysis.survival import _first_lethal_silence  # noqa: E402
+
+
+def _silence(bin_s: int, lead: int, quiet: int, tail: int = 2):
+    act = np.array([1] * lead + [0] * quiet + [1] * tail)
+    return np.arange(len(act)) * float(bin_s), act
+
+
+def test_twelve_hours_of_silence_at_60s_bins_meets_a_12_hour_window():
+    """720 silent 60 s bins are 12 h. Before 0.13.0 they measured 11 h 59 min
+    and were not a death; 721 were needed."""
+    t, act = _silence(60, lead=3, quiet=720)
+    assert _first_lethal_silence(t, act, 12 * 3600.0) == 3 * 60.0
+
+
+def test_twelve_hours_of_silence_at_30s_bins_meets_a_12_hour_window():
+    t, act = _silence(30, lead=3, quiet=1440)
+    assert _first_lethal_silence(t, act, 12 * 3600.0) == 3 * 30.0
+
+
+def test_one_bin_short_of_the_window_is_not_a_death_at_either_width():
+    t60, a60 = _silence(60, lead=3, quiet=719)
+    t30, a30 = _silence(30, lead=3, quiet=1439)
+    assert _first_lethal_silence(t60, a60, 12 * 3600.0) is None
+    assert _first_lethal_silence(t30, a30, 12 * 3600.0) is None
+
+
+def test_the_death_window_is_the_same_at_30s_and_60s():
+    """Identical behaviour at two bin widths: the same verdict for every length."""
+    for minutes in (719, 720, 721):
+        t60, a60 = _silence(60, lead=2, quiet=minutes)
+        t30, a30 = _silence(30, lead=4, quiet=2 * minutes)
+        assert ((_first_lethal_silence(t60, a60, 12 * 3600.0) is None)
+                == (_first_lethal_silence(t30, a30, 12 * 3600.0) is None)), minutes

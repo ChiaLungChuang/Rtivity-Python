@@ -3,11 +3,11 @@
 All notable changes to Rtivity-Python are recorded here.
 This project loosely follows [Semantic Versioning](https://semver.org/).
 
-## [0.13.0] — 2026-11-03
+## [0.13.0] — 2026-11-11
 
-A **metric definition change**, hence the minor version: sleep and activity
-results computed with 0.13.0 are not comparable with results from 0.12.x or
-earlier, at any bin width.
+A **metric definition change**, hence the minor version: sleep, activity and
+survival results computed with 0.13.0 are not comparable with results from
+0.12.x or earlier, at any bin width.
 
 ### Changed
 
@@ -33,18 +33,28 @@ earlier, at any bin width.
   bouts went from 306 to 175 as five-bin gaps are now bridged. Size on real
   data depends on how many quiet runs sit at the threshold.
 
-### Not changed
-
-- `survival._first_lethal_silence` measures a silent run the same
-  t_last − t_first way, so the death window is one bin longer than
-  `dead_window_h` says (one minute in twelve hours at 60 s bins). Recorded, not
-  changed in this release.
+- **The survival death window equals `dead_window_h`.**
+  `survival._first_lethal_silence` measured a silent run the same
+  t_last − t_first way, so a fly had to be silent one bin longer than the
+  window to be called dead (721 silent 60 s bins for a 12 h window, not 720).
+  It now uses the same run definition as the bouts: 720 silent 60 s bins, or
+  1,440 silent 30 s bins, meet a 12 h window exactly; one bin fewer does not.
+  The effect is one bin at the threshold, so it changes a death call only for a
+  silence that ends within one bin of the window.
+  `tests/test_survival_death_detection.py::TestFirstLethalSilence::
+  test_returns_first_qualifying_run_not_longest` encoded the old span in its
+  numbers (three silent hourly bins described as "span 2h"); its second window
+  moves from 3 h to 4 h so it still sits between the two runs (now 3 h and 5 h)
+  and still tests first-versus-longest.
 
 ### Added
 
-- `tests/test_bin_width.py`: fourteen tests on frames built in the test (no
+- `tests/test_bin_width.py`: eighteen tests on frames built in the test (no
   external data, so all run in CI). The first three were committed failing in
-  PR #2; on 0.12.1 seven of the fourteen fail.
+  PR #2. On 0.12.1, seven of the fourteen bout and helper tests fail, and two of
+  the four survival-window tests fail; the other two (one bin short of the
+  window is not a death, and the same verdict at 30 s and 60 s) hold on both and
+  guard against regressions.
 
 ## [0.12.1] — 2026-11-01
 
