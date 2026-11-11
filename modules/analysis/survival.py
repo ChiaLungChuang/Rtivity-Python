@@ -32,6 +32,8 @@ from lifelines import KaplanMeierFitter
 from lifelines.statistics import logrank_test as _pairwise_logrank
 from lifelines.statistics import multivariate_logrank_test
 
+from .bins import runs
+
 
 # ── build per-animal survival table ──────────────────────────────────────────
 
@@ -39,28 +41,21 @@ def _first_lethal_silence(
     t: np.ndarray, activity: np.ndarray, window_s: float
 ) -> float | None:
     """
-    Return the start time of the **first** contiguous zero-activity run whose
-    span is at least `window_s` seconds, scanning forward. None if no run
+    Return the start time of the **first** contiguous zero-activity run that
+    lasts at least `window_s` seconds, scanning forward. None if no run
     qualifies.
 
     A later run being longer does not matter — the first stretch of silence to
-    reach the threshold is the one that marks death.  Span is measured from the
-    first to the last zero sample of the run via `t`, so it does not assume a
-    fixed 1-minute sampling interval the way R's row-count / 60 does.
+    reach the threshold is the one that marks death.
+
+    A run of n silent bins lasts n × bin width (0.13.0), the bin width read from
+    `t` (`bins.runs`), the same definition the sleep and activity bouts use.
+    Before 0.13.0 the span was t_last − t_first, so a fly had to be silent one
+    bin longer than the window to be called dead.
     """
-    inactive = activity == 0
-    n = len(inactive)
-    i = 0
-    while i < n:
-        if not inactive[i]:
-            i += 1
-            continue
-        j = i
-        while j + 1 < n and inactive[j + 1]:
-            j += 1
-        if t[j] - t[i] >= window_s:
-            return float(t[i])
-        i = j + 1
+    for start, end in runs(np.asarray(activity) == 0, t):
+        if end - start >= window_s:
+            return float(start)
     return None
 
 

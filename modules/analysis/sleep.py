@@ -15,6 +15,8 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 
+from .bins import runs
+
 
 # ── sleep annotation ──────────────────────────────────────────────────────────
 
@@ -47,7 +49,7 @@ def annotate_sleep(
 
         for start_t, end_t in _inactive_bouts(active, t):
             if (end_t - start_t) >= threshold_s:
-                mask = (grp["t"] >= start_t) & (grp["t"] <= end_t)
+                mask = (grp["t"] >= start_t) & (grp["t"] < end_t)   # end is exclusive
                 df.loc[grp.index[mask], "asleep"] = True
 
     return df
@@ -393,19 +395,9 @@ def sleep_bout_count_by_day(df: pd.DataFrame) -> pd.DataFrame:
 def _inactive_bouts(
     active: np.ndarray, t: np.ndarray
 ) -> list[tuple[float, float]]:
-    """Return (start_t, end_t) for each contiguous inactive run."""
-    bouts: list[tuple[float, float]] = []
-    in_bout = False
-    for i, is_active in enumerate(active):
-        if not is_active and not in_bout:
-            start = t[i]
-            in_bout = True
-        elif is_active and in_bout:
-            bouts.append((start, t[i - 1]))
-            in_bout = False
-    if in_bout:
-        bouts.append((start, t[-1]))
-    return bouts
+    """(start_t, end_t) for each contiguous inactive run; end_t is exclusive,
+    so end_t - start_t is the run's bin count × bin width (see bins.py)."""
+    return runs(~np.asarray(active, dtype=bool), t)
 
 
 def _state_bouts(
@@ -414,18 +406,8 @@ def _state_bouts(
     *,
     state: bool = True,
 ) -> list[tuple[float, float]]:
-    bouts: list[tuple[float, float]] = []
-    in_bout = False
-    for i, val in enumerate(state_arr):
-        if val == state and not in_bout:
-            start = t[i]
-            in_bout = True
-        elif val != state and in_bout:
-            bouts.append((start, t[i - 1]))
-            in_bout = False
-    if in_bout:
-        bouts.append((start, t[-1]))
-    return bouts
+    """(start_t, end_t) for each run of `state`; end_t is exclusive."""
+    return runs(np.asarray(state_arr, dtype=bool) == state, t)
 
 
 def _clip_to_cycle(start_t: float, end_t: float, period_s: float) -> float:

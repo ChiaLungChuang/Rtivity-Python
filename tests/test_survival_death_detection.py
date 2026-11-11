@@ -33,13 +33,15 @@ def _animal(activity_by_hour: list[float]) -> pd.DataFrame:
 
 class TestFirstLethalSilence:
     def test_returns_first_qualifying_run_not_longest(self):
-        # hourly samples: active, 3 silent (span 2h), active, 5 silent (span 4h), active
+        # hourly bins: active, 3 silent (3h), active, 5 silent (5h), active.
+        # A run of n bins lasts n x bin width (0.13.0); before, this comment read
+        # "span 2h / span 4h" and the second window was 3h.
         t = np.arange(11) * 3600.0
         act = np.array([1, 0, 0, 0, 1, 0, 0, 0, 0, 0, 1])
-        # window 2h: first run (span 2h) qualifies -> its start at t=1h
-        assert _first_lethal_silence(t, act, 2 * 3600.0) == 1 * 3600.0
-        # window 3h: first run (2h) too short, second run (4h) qualifies -> t=5h
-        assert _first_lethal_silence(t, act, 3 * 3600.0) == 5 * 3600.0
+        # window 3h: first run (3h) qualifies -> its start at t=1h
+        assert _first_lethal_silence(t, act, 3 * 3600.0) == 1 * 3600.0
+        # window 4h: first run (3h) too short, second run (5h) qualifies -> t=5h
+        assert _first_lethal_silence(t, act, 4 * 3600.0) == 5 * 3600.0
 
     def test_none_when_always_active(self):
         t = np.arange(3) * 3600.0
@@ -48,12 +50,12 @@ class TestFirstLethalSilence:
 
     def test_none_when_no_run_reaches_threshold(self):
         t = np.arange(5) * 3600.0
-        act = np.array([1, 0, 0, 1, 0])  # longest silent span is 1h
+        act = np.array([1, 0, 0, 1, 0])  # longest silent run is 2h
         assert _first_lethal_silence(t, act, 12 * 3600.0) is None
 
     def test_trailing_silence_qualifies(self):
         t = np.arange(5) * 3600.0
-        act = np.array([1, 1, 0, 0, 0])  # silent from t=2h, span 2h
+        act = np.array([1, 1, 0, 0, 0])  # silent from t=2h, 3h long
         assert _first_lethal_silence(t, act, 1 * 3600.0) == 2 * 3600.0
 
 

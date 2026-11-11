@@ -15,6 +15,8 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 
+from .bins import runs
+
 
 # ── bout detection ────────────────────────────────────────────────────────────
 
@@ -60,7 +62,7 @@ def detect_activity_bouts(
         for (t_start, t_end) in bouts:
             # row that contains t_start
             start_pos = np.searchsorted(t, t_start)
-            end_pos   = np.searchsorted(t, t_end, side="right")
+            end_pos   = np.searchsorted(t, t_end, side="left")   # t_end exclusive
             if start_pos >= len(t):
                 continue
 
@@ -78,19 +80,10 @@ def detect_activity_bouts(
 def _raw_bouts(
     active: np.ndarray, t: np.ndarray
 ) -> list[tuple[float, float]]:
-    """Return list of (start_t, end_t) for each contiguous active run."""
-    bouts: list[tuple[float, float]] = []
-    in_bout = False
-    for i, is_active in enumerate(active):
-        if is_active and not in_bout:
-            bout_start = t[i]
-            in_bout = True
-        elif not is_active and in_bout:
-            bouts.append((bout_start, t[i - 1]))
-            in_bout = False
-    if in_bout:
-        bouts.append((bout_start, t[-1]))
-    return bouts
+    """(start_t, end_t) for each contiguous active run; end_t is exclusive, so
+    end_t - start_t is the run's bin count × bin width (see bins.py), and the
+    gap to the next run's start is exactly the quiet time between them."""
+    return runs(np.asarray(active, dtype=bool), t)
 
 
 def _merge_bouts(
